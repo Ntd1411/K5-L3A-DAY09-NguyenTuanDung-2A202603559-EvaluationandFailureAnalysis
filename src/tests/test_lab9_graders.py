@@ -68,7 +68,7 @@ def test_reply_amount_equal_to_ledger(graders):
     assert graders.ReplyLedgerConsistent().evaluate(ctx(t, {**LABEL, "refund_vnd": 20000})).value is True
 
 
-def test_no_reply_amount_is_neutral_for_locked_swarm(graders):
+def test_no_reply_amount_is_neutral_without_reply_event(graders):
     assert graders.ReplyLedgerConsistent().evaluate(ctx(trial())).value is True
 
 
