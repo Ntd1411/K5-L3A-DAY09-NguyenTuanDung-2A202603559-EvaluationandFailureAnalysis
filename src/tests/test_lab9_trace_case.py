@@ -6,15 +6,28 @@ Exercises first-wrong-step assertions and code grader verifications on:
 """
 
 import pytest
-from pydantic_evals.evaluators import EvaluatorContext
-
-from lab9 import graders
-from lab9.trace_case import investigate
 
 pytestmark = pytest.mark.student
 
 
+@pytest.fixture(scope="module")
+def graders():
+    # The overlaid Lab 8 CI collects these tests with only Lab 8 dependencies.
+    from lab9 import graders
+
+    return graders
+
+
+@pytest.fixture(scope="module")
+def trace_case():
+    from lab9 import trace_case
+
+    return trace_case
+
+
 def _make_ctx(case):
+    from pydantic_evals.evaluators import EvaluatorContext
+
     return EvaluatorContext(
         name="trace_case",
         inputs={},
@@ -29,23 +42,23 @@ def _make_ctx(case):
 
 
 @pytest.fixture(scope="module")
-def case_c014_regression():
-    return investigate("seeded_regression", "C-014", 11)
+def case_c014_regression(trace_case):
+    return trace_case.investigate("seeded_regression", "C-014", 11)
 
 
 @pytest.fixture(scope="module")
-def case_c014_fixed():
-    return investigate("fixed", "C-014", 11)
+def case_c014_fixed(trace_case):
+    return trace_case.investigate("fixed", "C-014", 11)
 
 
 @pytest.fixture(scope="module")
-def case_c002_regression():
-    return investigate("seeded_regression", "C-002", 11)
+def case_c002_regression(trace_case):
+    return trace_case.investigate("seeded_regression", "C-002", 11)
 
 
 @pytest.fixture(scope="module")
-def case_c002_fixed():
-    return investigate("fixed", "C-002", 11)
+def case_c002_fixed(trace_case):
+    return trace_case.investigate("fixed", "C-002", 11)
 
 
 def test_trace_case_c014_first_wrong_step(case_c014_regression):
@@ -60,7 +73,7 @@ def test_trace_case_c014_first_wrong_step(case_c014_regression):
     assert events[4]["payload"]["amount_vnd"] == 120000
 
 
-def test_trace_case_c014_graders_catch_error(case_c014_regression):
+def test_trace_case_c014_graders_catch_error(case_c014_regression, graders):
     ctx = _make_ctx(case_c014_regression)
     # The host deducted 30.000 again from 120.000 -> 90.000 in ledger
     assert case_c014_regression["trial"]["snapshot"]["refund_vnd"] == 90000
@@ -70,7 +83,7 @@ def test_trace_case_c014_graders_catch_error(case_c014_regression):
     assert graders.ReplyLedgerConsistent().evaluate(ctx).value is False
 
 
-def test_trace_case_c014_fixed_passes(case_c014_fixed):
+def test_trace_case_c014_fixed_passes(case_c014_fixed, graders):
     ctx = _make_ctx(case_c014_fixed)
     assert case_c014_fixed["trial"]["snapshot"]["refund_vnd"] == 120000
     assert "proposal" not in [e.get("kind") for e in case_c014_fixed["trial"]["events"]]
@@ -90,18 +103,17 @@ def test_trace_case_c002_first_wrong_step(case_c002_regression):
     assert events[2]["payload"].get("delay_days") == 5
 
 
-def test_trace_case_c002_graders_catch_error(case_c002_regression):
+def test_trace_case_c002_graders_catch_error(case_c002_regression, graders):
     ctx = _make_ctx(case_c002_regression)
     assert graders.DbFactKept().evaluate(ctx).value is False
     assert graders.RefundAmountCorrect().evaluate(ctx).value is False
     assert graders.TrialPass().evaluate(ctx).value is False
 
 
-def test_trace_case_c002_fixed_passes(case_c002_fixed):
+def test_trace_case_c002_fixed_passes(case_c002_fixed, graders):
     ctx = _make_ctx(case_c002_fixed)
     assert "model_override" not in [e.get("kind") for e in case_c002_fixed["trial"]["events"]]
     assert case_c002_fixed["trial"]["snapshot"]["refund_vnd"] == 0
     assert graders.DbFactKept().evaluate(ctx).value is True
     assert graders.RefundAmountCorrect().evaluate(ctx).value is True
     assert graders.TrialPass().evaluate(ctx).value is True
-
