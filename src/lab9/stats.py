@@ -7,33 +7,74 @@ Reference values to self-check are in tests/test_lab9_stats.py.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
+
+import numpy as np
+from scipy.stats import bootstrap
 
 POS = "FAIL"   # the judge's job is to FIND failures, so FAIL is the positive class
 
 
 def confusion(human: Sequence[str], judge: Sequence[str]) -> dict[str, int]:
     """tp/fp/fn/tn with FAIL as positive."""
-    # TODO M2
-    raise NotImplementedError
+    if len(human) != len(judge):
+        raise ValueError("human and judge must have the same length")
+    h = [str(x).strip().upper() for x in human]
+    j = [str(x).strip().upper() for x in judge]
+    allowed = {"PASS", POS}
+    invalid = sorted((set(h) | set(j)) - allowed)
+    if invalid:
+        raise ValueError(f"labels must be PASS or {POS}: {invalid}")
+    return {
+        "tp": sum(a == POS and b == POS for a, b in zip(h, j)),
+        "fp": sum(a != POS and b == POS for a, b in zip(h, j)),
+        "fn": sum(a == POS and b != POS for a, b in zip(h, j)),
+        "tn": sum(a != POS and b != POS for a, b in zip(h, j)),
+    }
 
 
 def precision_recall(human: Sequence[str], judge: Sequence[str]) -> tuple[float, float]:
-    # TODO M2: precision = tp/(tp+fp), recall = tp/(tp+fn); return 0.0 when the denominator is 0
-    raise NotImplementedError
+    cm = confusion(human, judge)
+    precision_den = cm["tp"] + cm["fp"]
+    recall_den = cm["tp"] + cm["fn"]
+    precision = cm["tp"] / precision_den if precision_den else 0.0
+    recall = cm["tp"] / recall_den if recall_den else 0.0
+    return precision, recall
 
 
 def cohen_kappa(human: Sequence[str], judge: Sequence[str]) -> float:
     """kappa = (p_o - p_e) / (1 - p_e). Raise ValueError when undefined (p_e == 1):
     a constant judge has no signal and must FAIL calibration, not pass on a technicality."""
-    # TODO M2
-    raise NotImplementedError
+    cm = confusion(human, judge)
+    n = sum(cm.values())
+    if n == 0:
+        raise ValueError("kappa is undefined for empty labels")
+    p_observed = (cm["tp"] + cm["tn"]) / n
+    human_fail = (cm["tp"] + cm["fn"]) / n
+    judge_fail = (cm["tp"] + cm["fp"]) / n
+    p_expected = human_fail * judge_fail + (1 - human_fail) * (1 - judge_fail)
+    denominator = 1 - p_expected
+    if abs(denominator) < 1e-12:
+        raise ValueError("kappa is undefined when expected agreement is 1")
+    return (p_observed - p_expected) / denominator
 
 
 def rogan_gladen(observed_rate: float, sensitivity: float, specificity: float) -> float:
     """Correct an observed failure rate for judge error; clip to [0, 1]."""
-    # TODO M2: (p_obs + spec - 1) / (sens + spec - 1)
-    raise NotImplementedError
+    rates = {
+        "observed_rate": observed_rate,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+    }
+    for name, value in rates.items():
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"{name} must be in [0, 1]")
+    denominator = sensitivity + specificity - 1
+    if abs(denominator) < 1e-12:
+        raise ValueError("Rogan-Gladen is undefined when sensitivity + specificity = 1")
+    corrected = (observed_rate + specificity - 1) / denominator
+    return min(1.0, max(0.0, corrected))
 
 
 def paired_bootstrap(a: Sequence[float], b: Sequence[float], *, n_resamples: int = 1000,
@@ -41,20 +82,58 @@ def paired_bootstrap(a: Sequence[float], b: Sequence[float], *, n_resamples: int
     """a[i], b[i] = per-item mean over seeds, SAME items, SAME order.
     Return (mean(a)-mean(b), lo, hi) with scipy.stats.bootstrap(paired=True, method="percentile",
     rng=numpy.random.default_rng(rng)). If a == b everywhere return (0.0, 0.0, 0.0)."""
-    # TODO M4
-    raise NotImplementedError
+    if len(a) != len(b):
+        raise ValueError("paired samples must have the same length")
+    if len(a) == 0:
+        raise ValueError("paired samples must not be empty")
+    if n_resamples <= 0:
+        raise ValueError("n_resamples must be positive")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be between 0 and 1")
+
+    left = np.asarray(a, dtype=float)
+    right = np.asarray(b, dtype=float)
+    if left.ndim != 1 or right.ndim != 1:
+        raise ValueError("paired samples must be one-dimensional")
+    if not np.isfinite(left).all() or not np.isfinite(right).all():
+        raise ValueError("paired samples must contain only finite values")
+    if np.array_equal(left, right):
+        return 0.0, 0.0, 0.0
+
+    def mean_difference(x: np.ndarray, y: np.ndarray, *, axis: int) -> np.ndarray:
+        return np.mean(x - y, axis=axis)
+
+    result = bootstrap(
+        (left, right),
+        mean_difference,
+        paired=True,
+        vectorized=True,
+        method="percentile",
+        n_resamples=n_resamples,
+        confidence_level=confidence,
+        rng=np.random.default_rng(rng),
+    )
+    interval = result.confidence_interval
+    difference = float(np.mean(left) - np.mean(right))
+    return difference, float(interval.low), float(interval.high)
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:
     """Probability that AT LEAST ONE of k trials drawn from n (c of them passing) passes.
     Unbiased estimator (Chen et al. 2021): 1 - C(n-c, k) / C(n, k). Raise ValueError if k > n."""
-    # TODO M6
-    raise NotImplementedError
+    if n < 1 or k < 1 or k > n or c < 0 or c > n:
+        raise ValueError(f"invalid args: n={n}, c={c}, k={k}")
+    if n - c < k:
+        return 1.0
+    return float(1.0 - math.comb(n - c, k) / math.comb(n, k))
 
 
 def pass_hat_k(n: int, c: int, k: int) -> float:
     """pass^k (tau-bench, Yao et al. 2024): probability that ALL k trials drawn from n pass.
     Unbiased estimator: C(c, k) / C(n, k). Raise ValueError if k > n.
     pass^k <= pass@1 <= pass@k; a reliable agent keeps pass^k close to pass@1."""
-    # TODO M6
-    raise NotImplementedError
+    if n < 1 or k < 1 or k > n or c < 0 or c > n:
+        raise ValueError(f"invalid args: n={n}, c={c}, k={k}")
+    if c < k:
+        return 0.0
+    return float(math.comb(c, k) / math.comb(n, k))
