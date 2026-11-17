@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import numpy as np
+from scipy.stats import bootstrap
+
 POS = "FAIL"   # the judge's job is to FIND failures, so FAIL is the positive class
 
 
@@ -78,8 +81,40 @@ def paired_bootstrap(a: Sequence[float], b: Sequence[float], *, n_resamples: int
     """a[i], b[i] = per-item mean over seeds, SAME items, SAME order.
     Return (mean(a)-mean(b), lo, hi) with scipy.stats.bootstrap(paired=True, method="percentile",
     rng=numpy.random.default_rng(rng)). If a == b everywhere return (0.0, 0.0, 0.0)."""
-    # TODO M4
-    raise NotImplementedError
+    if len(a) != len(b):
+        raise ValueError("paired samples must have the same length")
+    if len(a) == 0:
+        raise ValueError("paired samples must not be empty")
+    if n_resamples <= 0:
+        raise ValueError("n_resamples must be positive")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be between 0 and 1")
+
+    left = np.asarray(a, dtype=float)
+    right = np.asarray(b, dtype=float)
+    if left.ndim != 1 or right.ndim != 1:
+        raise ValueError("paired samples must be one-dimensional")
+    if not np.isfinite(left).all() or not np.isfinite(right).all():
+        raise ValueError("paired samples must contain only finite values")
+    if np.array_equal(left, right):
+        return 0.0, 0.0, 0.0
+
+    def mean_difference(x: np.ndarray, y: np.ndarray, *, axis: int) -> np.ndarray:
+        return np.mean(x - y, axis=axis)
+
+    result = bootstrap(
+        (left, right),
+        mean_difference,
+        paired=True,
+        vectorized=True,
+        method="percentile",
+        n_resamples=n_resamples,
+        confidence_level=confidence,
+        rng=np.random.default_rng(rng),
+    )
+    interval = result.confidence_interval
+    difference = float(np.mean(left) - np.mean(right))
+    return difference, float(interval.low), float(interval.high)
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:
